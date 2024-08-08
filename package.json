@@ -1,0 +1,22 @@
+{
+  "name": "github-pr-analysis",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node --env-file=.env github.js "
+    
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@octokit/graphql": "^8.1.1",
+    "@slack/web-api": "^7.3.1",
+    "chalk": "^5.3.0",
+    "luxon": "^3.4.4",
+    "node-fetch": "^3.3.2"
+  }
+}
