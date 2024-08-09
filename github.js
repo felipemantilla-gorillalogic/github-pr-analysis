@@ -22,6 +22,7 @@ const REPO_URLS = [
 const PR_COUNT = 1000;
 const START_DATE = DateTime.fromISO('2024-06-01');
 const END_DATE = DateTime.fromISO('2024-08-06');
+const FILTER_MO_REVIEW = process.argv.includes('--filter-mo-review');
 
 // ========================
 // Utility Functions
@@ -243,10 +244,12 @@ async function filterPRs(prs, slackMessages) {
       return false;
     }
 
-    // // Filter PRs that have a review from "mopurepm"
-    const hasMopurepmReview = reviews.some(review => review.author.login === "mopurepm");
-    if (!hasMopurepmReview) {
-      return false;
+    // Filter PRs that have a review from "mopurepm" only if FILTER_MO_REVIEW is true
+    if (FILTER_MO_REVIEW) {
+      const hasMopurepmReview = reviews.some(review => review.author.login === "mopurepm");
+      if (!hasMopurepmReview) {
+        return false;
+      }
     }
 
     return true;
@@ -275,6 +278,7 @@ function printResults(repoName, prDetails, totalWaitingTimeMillis, mostDelayedPR
   console.log(chalk.cyan(divider));
   console.log(chalk.cyan.bold(`${repoName.toUpperCase()}`));
   console.log(chalk.cyan(`Date Range: ${START_DATE.toISODate()} to ${END_DATE.toISODate()}`));
+  console.log(chalk.cyan(FILTER_MO_REVIEW ? "WITH MO REVIEW" : "WITHOUT MO REVIEW"));
   console.log(chalk.cyan(divider));
 
   if (prDetails.length > 0) {
