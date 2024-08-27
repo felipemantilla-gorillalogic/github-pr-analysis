@@ -6,8 +6,10 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --env-file=.env github.js "
-    
+    "slack:update-history": "node --env-file=.env slack/history.js",
+    "github:pr-analysis": "node --env-file=.env github.js",
+    "github:pr-analysis:mo": "node --env-file=.env github.js --filter-mo-review"
+
   },
   "keywords": [],
   "author": "",

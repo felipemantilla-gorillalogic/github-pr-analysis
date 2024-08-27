@@ -8,21 +8,13 @@ import fs from 'fs/promises';
 // ========================
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-
-if(!GITHUB_TOKEN) {
-  console.error(chalk.red('Please set the GITHUB_TOKEN environment variable.'));
-  process.exit(1);
-}
-
 const REPO_URLS = [
   'https://github.com/purepm/backend-monorepo',
-  // 'https://github.com/purepm/frontend-monorepo',
-  // Add more repository URLs here
+  // Add more repository URLs as needed
 ];
 const PR_COUNT = 1000;
 const START_DATE = DateTime.fromISO('2024-06-01');
-const END_DATE = DateTime.fromISO('2024-08-06');
-const FILTER_MO_REVIEW = process.argv.includes('--filter-mo-review');
+const END_DATE = DateTime.fromISO('2024-08-27');
 
 // ========================
 // Utility Functions
@@ -39,24 +31,12 @@ async function readJSONFile(filename) {
 }
 
 function formatDate(date) {
-  return new Date(date).toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true
-  });
+  return DateTime.fromISO(date).toLocaleString(DateTime.DATETIME_SHORT);
 }
 
 function formatDuration(milliseconds) {
   const duration = Duration.fromMillis(milliseconds);
-  const days = Math.floor(duration.as('days'));
-  const hours = Math.floor(duration.as('hours') % 24);
-  const minutes = Math.floor(duration.as('minutes') % 60);
-  const seconds = Math.floor(duration.as('seconds') % 60);
-  return `${days} days, ${hours} hours, ${minutes} minutes, ${seconds} seconds`;
+  return duration.toFormat("d 'days', h 'hours', m 'minutes', s 'seconds'");
 }
 
 // ========================
@@ -73,7 +53,7 @@ function createGraphQLQuery(owner, repo, cursor = null) {
           title
           createdAt
           number
-          reviews(first: 10) {
+          reviews(first: 20, states: [APPROVED]) {
             nodes {
               createdAt
               author {
@@ -82,15 +62,7 @@ function createGraphQLQuery(owner, repo, cursor = null) {
               state
             }
           }
-          reviewDecision
-          latestReviews(first: 10) {
-            nodes {
-              author {
-                login
-              }
-              state
-            }
-          }
+          mergedAt
         }
         pageInfo {
           hasNextPage
@@ -150,24 +122,25 @@ async function fetchPRDetailsFromAPI(owner, repo, prCount) {
 
 function findPRInSlackMessages(prNumber, slackMessages) {
   return slackMessages.find(message =>
-    message.link.includes(`/pull/${prNumber}`)
+    message.link && message.link.includes(`/pull/${prNumber}`)
   );
 }
 
-function calculatePRInfo(pr, prCreationDate, reviews, slackMessage, owner, repo) {
-  const sortedReviews = reviews.sort((a, b) =>
-    DateTime.fromISO(a.createdAt).toMillis() - DateTime.fromISO(b.createdAt).toMillis()
-  );
-  const secondReviewDate = DateTime.fromISO(sortedReviews[1].createdAt);
-  const slackMessageDate = slackMessage ? DateTime.fromMillis(parseFloat(slackMessage.timestamp) * 1000) : null;
+function calculatePRInfo(pr, slackMessage, owner, repo) {
+  const prCreationDate = DateTime.fromISO(pr.createdAt);
+  const approvedReviews = pr.reviews.nodes
+    .sort((a, b) => DateTime.fromISO(a.createdAt).toMillis() - DateTime.fromISO(b.createdAt).toMillis());
 
-  let timeDifference, waitTimeMillis;
-  if (slackMessageDate) {
-    timeDifference = secondReviewDate.diff(slackMessageDate);
-    waitTimeMillis = timeDifference.as('milliseconds');
-  } else {
-    timeDifference = secondReviewDate.diff(prCreationDate);
-    waitTimeMillis = timeDifference.as('milliseconds');
+  const slackMessageDate = slackMessage 
+    ? DateTime.fromMillis(parseFloat(slackMessage.timestamp) * 1000) 
+    : null;
+
+  const secondApprovedReview = approvedReviews[1];
+  const secondApprovedReviewDate = secondApprovedReview ? DateTime.fromISO(secondApprovedReview.createdAt) : null;
+
+  let waitTimeMillis = 0;
+  if (slackMessageDate && secondApprovedReviewDate) {
+    waitTimeMillis = secondApprovedReviewDate.diff(slackMessageDate).as('milliseconds');
   }
 
   return {
@@ -175,15 +148,59 @@ function calculatePRInfo(pr, prCreationDate, reviews, slackMessage, owner, repo)
     title: pr.title,
     creationDate: prCreationDate.toISO(),
     slackMessageDate: slackMessageDate ? slackMessageDate.toISO() : 'N/A',
-    secondReviewDate: secondReviewDate.toISO(),
-    timeDifference: timeDifference.toObject(),
+    secondApprovedReviewDate: secondApprovedReviewDate ? secondApprovedReviewDate.toISO() : 'N/A',
     waitTimeMillis: waitTimeMillis,
     owner: owner,
-    repo: repo
+    repo: repo,
+    approvedReviews: approvedReviews
   };
 }
 
-async function processPRData(filteredPRs, owner, repo, slackMessages) {
+function filterPRs(prs, slackMessages) {
+  console.log(chalk.blue(`Total PRs before filtering: ${prs.length}`));
+
+  const filteredPRs = prs.filter(pr => {
+    const prCreationDate = DateTime.fromISO(pr.createdAt);
+    const approvedReviews = pr.reviews.nodes;
+    const slackMessage = findPRInSlackMessages(pr.number, slackMessages);
+
+    // Filter conditions
+    const isInDateRange = prCreationDate >= START_DATE && prCreationDate <= END_DATE;
+    const hasTwoOrMoreApprovedReviews = approvedReviews.length >= 2;
+    const hasSlackMessage = !!slackMessage;
+    const isSecondApprovedReviewAfterSlack = hasSlackMessage && approvedReviews[1] && 
+      DateTime.fromISO(approvedReviews[1].createdAt) > DateTime.fromMillis(parseFloat(slackMessage.timestamp) * 1000);
+
+    // Logging for debugging
+    if (!isInDateRange) console.log(chalk.yellow(`PR ${pr.number} filtered: Not in date range`));
+    if (!hasTwoOrMoreApprovedReviews) console.log(chalk.yellow(`PR ${pr.number} filtered: Less than 2 approved reviews`));
+    if (!hasSlackMessage) console.log(chalk.yellow(`PR ${pr.number} filtered: No Slack message`));
+    if (!isSecondApprovedReviewAfterSlack) console.log(chalk.yellow(`PR ${pr.number} filtered: Second approved review not after Slack message`));
+
+    return isInDateRange && hasTwoOrMoreApprovedReviews && hasSlackMessage && isSecondApprovedReviewAfterSlack;
+  });
+
+  console.log(chalk.green(`Filtered PRs: ${filteredPRs.length}`));
+  return filteredPRs;
+}
+
+function separatePRs(filteredPRs) {
+  const withMoReview = [];
+  const withoutMoReview = [];
+
+  filteredPRs.forEach(pr => {
+    const hasMoReview = pr.reviews.nodes.some(review => review.author.login === "mopurepm");
+    if (hasMoReview) {
+      withMoReview.push(pr);
+    } else {
+      withoutMoReview.push(pr);
+    }
+  });
+
+  return { withMoReview, withoutMoReview };
+}
+
+async function processPRData(prs, owner, repo, slackMessages) {
   const prDetails = [];
   let totalWaitingTimeMillis = 0;
   let mostDelayedPR = null;
@@ -191,69 +208,26 @@ async function processPRData(filteredPRs, owner, repo, slackMessages) {
   let longestWaitTime = 0;
   let shortestWaitTime = Infinity;
 
-  filteredPRs.forEach((pr) => {
-    const prCreationDate = DateTime.fromISO(pr.createdAt);
-    const reviews = pr.reviews.nodes;
+  prs.forEach((pr) => {
     const slackMessage = findPRInSlackMessages(pr.number, slackMessages);
-
-    const prInfo = calculatePRInfo(pr, prCreationDate, reviews, slackMessage, owner, repo);
+    const prInfo = calculatePRInfo(pr, slackMessage, owner, repo);
     prDetails.push(prInfo);
-    totalWaitingTimeMillis += prInfo.waitTimeMillis;
 
-    if (prInfo.waitTimeMillis > longestWaitTime) {
-      longestWaitTime = prInfo.waitTimeMillis;
-      mostDelayedPR = prInfo;
-    }
-    if (prInfo.waitTimeMillis < shortestWaitTime) {
-      shortestWaitTime = prInfo.waitTimeMillis;
-      quickestPR = prInfo;
+    if (prInfo.waitTimeMillis > 0) {
+      totalWaitingTimeMillis += prInfo.waitTimeMillis;
+
+      if (prInfo.waitTimeMillis > longestWaitTime) {
+        longestWaitTime = prInfo.waitTimeMillis;
+        mostDelayedPR = prInfo;
+      }
+      if (prInfo.waitTimeMillis < shortestWaitTime) {
+        shortestWaitTime = prInfo.waitTimeMillis;
+        quickestPR = prInfo;
+      }
     }
   });
 
   return { prDetails, totalWaitingTimeMillis, mostDelayedPR, quickestPR };
-}
-
-async function filterPRs(prs, slackMessages) {
-  return prs.filter(pr => {
-    const prCreationDate = DateTime.fromISO(pr.createdAt);
-    
-    // Filter PRs that are in the range of the dates
-    if (prCreationDate < START_DATE || prCreationDate > END_DATE) {
-      return false;
-    }
-
-    const reviews = pr.reviews.nodes;
-    
-    // Filter PRs that have two or more reviews
-    if (reviews.length < 2) {
-      return false;
-    }
-
-    const slackMessage = findPRInSlackMessages(pr.number, slackMessages);
-
-    // Filter PRs that have a slack message
-    if (!slackMessage) {
-      return false;
-    }
-
-    const secondReviewDate = DateTime.fromISO(reviews[1].createdAt);
-    const slackMessageDate = DateTime.fromMillis(parseFloat(slackMessage.timestamp) * 1000);
-
-    // Filter PRs where the second review is after the slack message
-    if (secondReviewDate < slackMessageDate) {
-      return false;
-    }
-
-    // Filter PRs that have a review from "mopurepm" only if FILTER_MO_REVIEW is true
-    if (FILTER_MO_REVIEW) {
-      const hasMopurepmReview = reviews.some(review => review.author.login === "mopurepm");
-      if (!hasMopurepmReview) {
-        return false;
-      }
-    }
-
-    return true;
-  });
 }
 
 // ========================
@@ -263,27 +237,29 @@ async function filterPRs(prs, slackMessages) {
 function printPRDetails(pr) {
   if (pr) {
     const prUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.prNumber}`;
-    
     console.log(chalk.cyan(`PR #${pr.prNumber} - ${pr.title}`));
     console.log(chalk.yellow(`URL: ${prUrl}`));
     console.log(chalk.yellow(`Created: ${formatDate(pr.creationDate)}`));
     console.log(chalk.yellow(`Slack Message: ${formatDate(pr.slackMessageDate)}`));
-    console.log(chalk.yellow(`Second Review: ${formatDate(pr.secondReviewDate)}`));
+    console.log(chalk.yellow(`Second Approved Review: ${formatDate(pr.secondApprovedReviewDate)}`));
     console.log(chalk.green(`Time Difference: ${formatDuration(pr.waitTimeMillis)}`));
+    console.log(chalk.magenta('Approved Reviews:'));
+    pr.approvedReviews.forEach((review, index) => {
+      console.log(chalk.magenta(`  ${index + 1}. ${review.author.login} - ${formatDate(review.createdAt)}`));
+    });
   }
 }
 
-function printResults(repoName, prDetails, totalWaitingTimeMillis, mostDelayedPR, quickestPR) {
+function printResults(repoName, prDetails, totalWaitingTimeMillis, mostDelayedPR, quickestPR, title) {
   const divider = '--------------------------------------------------------';
   console.log(chalk.cyan(divider));
-  console.log(chalk.cyan.bold(`${repoName.toUpperCase()}`));
+  console.log(chalk.cyan.bold(`${repoName.toUpperCase()} - ${title}`));
   console.log(chalk.cyan(`Date Range: ${START_DATE.toISODate()} to ${END_DATE.toISODate()}`));
-  console.log(chalk.cyan(FILTER_MO_REVIEW ? "WITH MO REVIEW" : "WITHOUT MO REVIEW"));
   console.log(chalk.cyan(divider));
 
   if (prDetails.length > 0) {
     const averageWaitingTime = Duration.fromMillis(totalWaitingTimeMillis / prDetails.length);
-    console.log(chalk.white.bold(`Total PRs in date range: ${prDetails.length}`));
+    console.log(chalk.white.bold(`Total PRs: ${prDetails.length}`));
     console.log(chalk.white.bold('Average Waiting Time:'));
     console.log(chalk.blue(formatDuration(averageWaitingTime.as('milliseconds'))));
 
@@ -293,10 +269,33 @@ function printResults(repoName, prDetails, totalWaitingTimeMillis, mostDelayedPR
     console.log(chalk.white.bold('\nQuickest PR:'));
     printPRDetails(quickestPR);
   } else {
-    console.log(chalk.yellow('No PRs found within the specified date range.'));
+    console.log(chalk.yellow('No PRs found within the specified criteria.'));
   }
 
   console.log(chalk.cyan(divider));
+}
+
+function printComparison(withMoResults, withoutMoResults) {
+  console.log(chalk.magenta.bold('\nCOMPARISON SUMMARY'));
+  console.log(chalk.magenta('--------------------------------------------------------'));
+  
+  const withMoAvg = withMoResults.totalWaitingTimeMillis / withMoResults.prDetails.length;
+  const withoutMoAvg = withoutMoResults.totalWaitingTimeMillis / withoutMoResults.prDetails.length;
+  
+  console.log(chalk.white.bold('PRs with Mo review:'));
+  console.log(chalk.blue(`  Count: ${withMoResults.prDetails.length}`));
+  console.log(chalk.blue(`  Average waiting time: ${formatDuration(withMoAvg)}`));
+  
+  console.log(chalk.white.bold('\nPRs without Mo review:'));
+  console.log(chalk.blue(`  Count: ${withoutMoResults.prDetails.length}`));
+  console.log(chalk.blue(`  Average waiting time: ${formatDuration(withoutMoAvg)}`));
+  
+  const difference = Math.abs(withMoAvg - withoutMoAvg);
+  const fasterCategory = withMoAvg < withoutMoAvg ? "with Mo review" : "without Mo review";
+  console.log(chalk.white.bold('\nDifference:'));
+  console.log(chalk.green(`PRs ${fasterCategory} are faster by ${formatDuration(difference)}`));
+  
+  console.log(chalk.magenta('--------------------------------------------------------'));
 }
 
 // ========================
@@ -304,6 +303,11 @@ function printResults(repoName, prDetails, totalWaitingTimeMillis, mostDelayedPR
 // ========================
 
 async function main() {
+  if (!GITHUB_TOKEN) {
+    console.error(chalk.red('Please set the GITHUB_TOKEN environment variable.'));
+    process.exit(1);
+  }
+
   const slackMessages = await readJSONFile('slack_messages.json');
 
   for (const repoUrl of REPO_URLS) {
@@ -314,12 +318,22 @@ async function main() {
 
     if (repoData) {
       console.log(chalk.green(`Successfully fetched ${repoData.pullRequests.nodes.length} PRs.`));
-      
-      const filteredPRs = await filterPRs(repoData.pullRequests.nodes, slackMessages);
+
+      const filteredPRs = filterPRs(repoData.pullRequests.nodes, slackMessages);
       console.log(chalk.green(`Filtered down to ${filteredPRs.length} PRs matching criteria.`));
+
+      const { withMoReview, withoutMoReview } = separatePRs(filteredPRs);
+
+      const withMoResults = await processPRData(withMoReview, owner, repo, slackMessages);
+      const withoutMoResults = await processPRData(withoutMoReview, owner, repo, slackMessages);
+
+      printResults(repoData.name, withMoResults.prDetails, withMoResults.totalWaitingTimeMillis, 
+                   withMoResults.mostDelayedPR, withMoResults.quickestPR, "With Mo Review");
       
-      const { prDetails, totalWaitingTimeMillis, mostDelayedPR, quickestPR } = await processPRData(filteredPRs, owner, repo, slackMessages);
-      printResults(repoData.name, prDetails, totalWaitingTimeMillis, mostDelayedPR, quickestPR);
+      printResults(repoData.name, withoutMoResults.prDetails, withoutMoResults.totalWaitingTimeMillis, 
+                   withoutMoResults.mostDelayedPR, withoutMoResults.quickestPR, "Without Mo Review");
+
+      printComparison(withMoResults, withoutMoResults);
     } else {
       console.log(chalk.red(`Failed to fetch PR details for ${repoUrl}.`));
     }
@@ -327,4 +341,7 @@ async function main() {
 }
 
 // Run the main function
-main();
+main().catch(error => {
+  console.error(chalk.red('An error occurred:'), error);
+  process.exit(1);
+});
