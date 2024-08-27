@@ -1,91 +1,97 @@
+# GitHub PR Analysis
 
-# GitHub PR Analysis Script
-
-This script fetches and analyzes pull requests (PRs) from specified GitHub repositories within a defined date range, and calculates waiting times between PR creation, Slack messages, and reviews. It is particularly useful for understanding the review process efficiency in a GitHub repository.
+This project analyzes pull requests (PRs) from a specified GitHub repository, comparing PRs reviewed by a specific user (Mo) against those not reviewed by that user. It integrates with Slack to correlate PR creation times with Slack messages.
 
 ## Features
 
-- Fetches PRs from multiple repositories using the GitHub GraphQL API.
-- Filters PRs based on specific criteria (date range, reviews, Slack messages).
-- Calculates the waiting time between PR creation, Slack messages, and the second review.
-- Outputs detailed information about the most delayed and quickest PRs.
+- Fetches PR data from GitHub using GraphQL API
+- Filters PRs based on date range and review criteria
+- Integrates with Slack to correlate PRs with Slack messages
+- Compares PRs reviewed by a specific user (Mo) against others
+- Calculates and displays average waiting times, most delayed PRs, and quickest PRs
 
-## Requirements
+## Prerequisites
 
-- Node.js (v14 or higher)
-- A GitHub token with appropriate permissions to access the repositories.
+- Node.js (version 14 or higher recommended)
+- npm (comes with Node.js)
+- GitHub Personal Access Token with repo scope
+- Slack Bot Token with necessary permissions
 
 ## Installation
 
 1. Clone the repository:
-    ```bash
-    git clone https://github.com/felipemantilla0-gorillalogic/github-pr-analysis.git
-    cd github-pr-analysis
-    ```
+   ```
+   git clone [repository-url]
+   cd github-pr-analysis
+   ```
 
 2. Install dependencies:
-    ```bash
-    npm install
-    ```
+   ```
+   npm install
+   ```
 
-3. Set your GitHub token as an environment variable:
-    ```bash
-    export GITHUB_TOKEN=your_github_token
-    ```
+3. Create a `.env` file in the project root with the following content:
+   ```
+   GITHUB_TOKEN=your_github_token
+   SLACK_BOT_TOKEN=your_slack_bot_token
+   ```
 
-4. Create a `slack_messages.json` file in the root directory of the project. This file should contain the Slack messages in JSON format.
+   Replace `your_github_token` and `your_slack_bot_token` with your actual tokens.
+
+## Configuration
+
+Edit the following variables in the script as needed:
+
+- `REPO_URLS`: Add or modify the GitHub repository URLs you want to analyze
+- `PR_COUNT`: Set the number of PRs to fetch (default is 1000)
+- `START_DATE` and `END_DATE`: Set the date range for PR analysis
 
 ## Usage
 
-1. Modify the `REPO_URLS` array in the script to include the GitHub repositories you want to analyze.
+### Update Slack History
 
-2. Adjust the `PR_COUNT`, `START_DATE`, and `END_DATE` variables to define the number of PRs and the date range for your analysis.
-
-3. Run the script:
-    ```bash
-    node script.js
-    ```
-
-4. The script will output detailed information about PRs that match the criteria, including the average waiting time, most delayed PR, and quickest PR.
-
-## Example Output
+To update the Slack message history:
 
 ```
-Fetching 1000 PR details for https://github.com/purepm/backend-monorepo...
-Successfully fetched 50 PRs.
-Filtered down to 10 PRs matching criteria.
-
---------------------------------------------------------
-BACKEND-MONOREPO
-Date Range: 2024-06-01 to 2024-08-06
---------------------------------------------------------
-Total PRs in date range: 10
-Average Waiting Time:
-2 days, 4 hours, 30 minutes, 15 seconds
-
-Most Delayed PR:
-PR #123 - Improve authentication flow
-URL: https://github.com/purepm/backend-monorepo/pull/123
-Created: Mon, Jun 3, 2024, 12:00 PM
-Slack Message: Mon, Jun 3, 2024, 12:15 PM
-Second Review: Tue, Jun 4, 2024, 10:00 AM
-Time Difference: 1 day, 22 hours, 45 minutes, 15 seconds
-
-Quickest PR:
-PR #124 - Fix minor bug
-URL: https://github.com/purepm/backend-monorepo/pull/124
-Created: Wed, Jun 5, 2024, 09:00 AM
-Slack Message: Wed, Jun 5, 2024, 09:05 AM
-Second Review: Wed, Jun 5, 2024, 09:30 AM
-Time Difference: 25 minutes
---------------------------------------------------------
+npm run slack:update-history
 ```
 
-## Notes
+This will create or update a `slack_messages.json` file with recent Slack messages.
 
-- Ensure that the `slack_messages.json` file is correctly formatted and contains the necessary Slack message data.
-- Modify the filtering criteria in the script to suit your specific needs.
+### Run PR Analysis
+
+To perform the PR analysis:
+
+```
+npm run github:pr-analysis
+```
+
+This will fetch PR data from GitHub, correlate it with Slack messages, and display the analysis results.
+
+## Output
+
+The script will output:
+
+1. PR statistics for PRs reviewed by Mo
+2. PR statistics for PRs not reviewed by Mo
+3. A comparison summary of the two categories
+
+For each category, you'll see:
+- Total number of PRs
+- Average waiting time
+- Details of the most delayed PR
+- Details of the quickest PR
+
+## Troubleshooting
+
+- If you encounter authentication errors, ensure your GitHub token and Slack bot token are correct and have the necessary permissions.
+- If PRs are not being fetched or filtered as expected, check the `START_DATE` and `END_DATE` in the script.
+- For any other issues, check the console output for error messages and ensure all dependencies are correctly installed.
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the ISC License.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

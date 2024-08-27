@@ -5,11 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "slack:update-history": "node --env-file=.env slack/history.js",
-    "github:pr-analysis": "node --env-file=.env github.js",
-    "github:pr-analysis:mo": "node --env-file=.env github.js --filter-mo-review"
-
+    "github:pr-analysis": "node --env-file=.env github.js"
   },
   "keywords": [],
   "author": "",
